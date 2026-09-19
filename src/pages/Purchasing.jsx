@@ -22,7 +22,7 @@ export default function Purchasing() {
         .select('*, suppliers(name), purchase_order_items(id, quantity, unit_cost, products(name, sku))')
         .order('created_at', { ascending: false }),
       supabase.from('suppliers').select('id, name').order('name'),
-      supabase.from('products').select('id, name, sku, cost_price').order('name'),
+      supabase.from('products').select('id, name, sku, cost_price').eq('is_active', true).order('name'),
     ])
     setOrders(po || [])
     setSuppliers(sup || [])
