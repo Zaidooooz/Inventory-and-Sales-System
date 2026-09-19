@@ -20,19 +20,24 @@ export default function Inventory() {
   const [products, setProducts] = useState([])
   const [suppliers, setSuppliers] = useState([])
   const [search, setSearch] = useState('')
+  const [showArchived, setShowArchived] = useState(false)
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(emptyForm)
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     load()
-  }, [])
+  }, [showArchived])
 
   async function load() {
     setLoading(true)
+    let query = supabase.from('products').select('*, suppliers(name)').order('name')
+    if (!showArchived) query = query.eq('is_active', true)
+
     const [{ data: prod, error: e1 }, { data: sup }] = await Promise.all([
-      supabase.from('products').select('*, suppliers(name)').order('name'),
+      query,
       supabase.from('suppliers').select('id, name').order('name'),
     ])
     if (e1) setError(e1.message)
@@ -45,6 +50,7 @@ export default function Inventory() {
     setForm(emptyForm)
     setShowForm(true)
     setError('')
+    setNotice('')
   }
 
   function openEdit(p) {
@@ -62,6 +68,7 @@ export default function Inventory() {
     })
     setShowForm(true)
     setError('')
+    setNotice('')
   }
 
   async function handleSubmit(e) {
@@ -92,9 +99,41 @@ export default function Inventory() {
     load()
   }
 
-  async function handleDelete(id) {
-    if (!confirm('Delete this product? This cannot be undone.')) return
-    const { error } = await supabase.from('products').delete().eq('id', id)
+  async function handleDelete(product) {
+    if (!confirm(`Delete "${product.name}"? This cannot be undone.`)) return
+    setError('')
+    setNotice('')
+    const { error } = await supabase.from('products').delete().eq('id', product.id)
+
+    if (error) {
+      // Foreign key violation = this product has sales/purchase history and can't be hard-deleted.
+      if (error.code === '23503') {
+        const wantsArchive = confirm(
+          `"${product.name}" has already been sold or ordered, so it can't be deleted without ` +
+          `breaking that history.\n\nArchive it instead? Archived products are hidden from Sales, ` +
+          `Purchasing and the main list, but past records stay intact.`
+        )
+        if (wantsArchive) {
+          const { error: archiveError } = await supabase
+            .from('products')
+            .update({ is_active: false })
+            .eq('id', product.id)
+          if (archiveError) setError(archiveError.message)
+          else {
+            setNotice(`"${product.name}" archived.`)
+            load()
+          }
+        }
+        return
+      }
+      setError(error.message)
+      return
+    }
+    load()
+  }
+
+  async function handleRestore(product) {
+    const { error } = await supabase.from('products').update({ is_active: true }).eq('id', product.id)
     if (error) setError(error.message)
     else load()
   }
@@ -130,9 +169,14 @@ export default function Inventory() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 14, cursor: 'pointer' }}>
+          <input type="checkbox" style={{ width: 'auto' }} checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
+          <span style={{ fontSize: 13 }}>Show archived</span>
+        </label>
       </div>
 
       {error && <p className="error-text">{error}</p>}
+      {notice && <p className="success-text">{notice}</p>}
 
       <div className="card" style={{ padding: 0 }}>
         {loading ? (
@@ -155,9 +199,12 @@ export default function Inventory() {
             </thead>
             <tbody>
               {filtered.map((p) => (
-                <tr key={p.id}>
+                <tr key={p.id} style={p.is_active === false ? { opacity: 0.55 } : undefined}>
                   <td className="nums">{p.sku || '—'}</td>
-                  <td>{p.name}{p.brand ? <span style={{ color: 'var(--text-dim)' }}> · {p.brand}</span> : null}</td>
+                  <td>
+                    {p.name}{p.brand ? <span style={{ color: 'var(--text-dim)' }}> · {p.brand}</span> : null}
+                    {p.is_active === false && <span className="badge neutral" style={{ marginLeft: 8 }}>Archived</span>}
+                  </td>
                   <td>{p.category || '—'}</td>
                   <td>{p.suppliers?.name || '—'}</td>
                   <td className="num">{Number(p.cost_price).toFixed(2)}</td>
@@ -169,8 +216,14 @@ export default function Inventory() {
                   </td>
                   {canManageInventory && (
                     <td className="num">
-                      <button className="btn secondary sm" onClick={() => openEdit(p)}>Edit</button>{' '}
-                      <button className="btn danger sm" onClick={() => handleDelete(p.id)}>Delete</button>
+                      {p.is_active === false ? (
+                        <button className="btn secondary sm" onClick={() => handleRestore(p)}>Restore</button>
+                      ) : (
+                        <>
+                          <button className="btn secondary sm" onClick={() => openEdit(p)}>Edit</button>{' '}
+                          <button className="btn danger sm" onClick={() => handleDelete(p)}>Delete</button>
+                        </>
+                      )}
                     </td>
                   )}
                 </tr>
