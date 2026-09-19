@@ -42,7 +42,7 @@ export default function Login() {
   return (
     <div className="login-shell">
       <div className="login-card">
-        <h1>Shop Manager</h1>
+        <h1>Astrox</h1>
         <p className="sub">Inventory, purchasing &amp; sales</p>
 
         <div className="login-tabs">
