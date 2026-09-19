@@ -26,7 +26,7 @@ export default function Sales() {
   useEffect(() => { loadProducts() }, [])
 
   async function loadProducts() {
-    const { data } = await supabase.from('products').select('id, name, sku, sale_price, quantity').order('name')
+    const { data } = await supabase.from('products').select('id, name, sku, sale_price, quantity').eq('is_active', true).order('name')
     setProducts(data || [])
   }
 
