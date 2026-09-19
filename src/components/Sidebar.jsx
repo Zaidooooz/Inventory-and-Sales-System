@@ -14,7 +14,7 @@ export default function Sidebar() {
   return (
     <div className="sidebar">
       <div className="brand">
-        <strong>Shop Manager</strong>
+        <strong>Astrox</strong>
         <span>Inventory · Purchasing · Sales</span>
       </div>
       <nav>
