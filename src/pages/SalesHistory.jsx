@@ -1,89 +1,110 @@
-import React, { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../supabaseClient'
 
 export default function SalesHistory() {
-  const [sales, setSales] = useState([])
-  const [expanded, setExpanded] = useState(null)
-  const [items, setItems] = useState([])
+  const [rows, setRows] = useState([])
+  const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => { load() }, [])
 
   async function load() {
     setLoading(true)
-    const { data } = await supabase
+
+    const { data: sales } = await supabase
       .from('sales')
-      .select('*, profiles(full_name)')
+      .select('id, invoice_no, customer_name, payment_method, installments, created_at, profiles(full_name)')
       .order('created_at', { ascending: false })
-      .limit(100)
-    setSales(data || [])
+      .limit(300)
+
+    const saleIds = (sales || []).map((s) => s.id)
+    let flatRows = []
+
+    if (saleIds.length > 0) {
+      const { data: items } = await supabase
+        .from('sale_items')
+        .select('id, quantity, unit_price, sale_id, products(name, sku, cost_price)')
+        .in('sale_id', saleIds)
+
+      const salesById = Object.fromEntries((sales || []).map((s) => [s.id, s]))
+      flatRows = (items || [])
+        .map((it) => ({ ...it, sale: salesById[it.sale_id] }))
+        .filter((it) => it.sale)
+        .sort((a, b) => new Date(b.sale.created_at) - new Date(a.sale.created_at))
+    }
+
+    setRows(flatRows)
     setLoading(false)
   }
 
-  async function toggleExpand(sale) {
-    if (expanded === sale.id) {
-      setExpanded(null)
-      return
-    }
-    const { data } = await supabase
-      .from('sale_items')
-      .select('*, products(name, sku)')
-      .eq('sale_id', sale.id)
-    setItems(data || [])
-    setExpanded(sale.id)
-  }
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase()
+    if (!q) return rows
+    return rows.filter((r) =>
+      r.products?.name?.toLowerCase().includes(q) ||
+      r.products?.sku?.toLowerCase().includes(q) ||
+      r.sale?.customer_name?.toLowerCase().includes(q) ||
+      r.sale?.payment_method?.toLowerCase().includes(q) ||
+      r.sale?.invoice_no?.toLowerCase().includes(q)
+    )
+  }, [rows, search])
 
   return (
     <div>
       <div className="page-header">
         <div>
           <h1>Sales history</h1>
-          <p>Every sale recorded, most recent first</p>
+          <p>Every item sold, most recent first</p>
+        </div>
+      </div>
+
+      <div className="actions-row">
+        <div className="field" style={{ margin: 0, minWidth: 260 }}>
+          <input
+            type="text"
+            placeholder="Search by product, customer, payment method or invoice…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
         </div>
       </div>
 
       <div className="card" style={{ padding: 0 }}>
         {loading ? (
           <p style={{ padding: 20 }}>Loading…</p>
-        ) : sales.length === 0 ? (
-          <div className="empty-state">No sales recorded yet.</div>
+        ) : filtered.length === 0 ? (
+          <div className="empty-state">No sales match.</div>
         ) : (
           <table>
             <thead>
               <tr>
-                <th>Invoice</th><th>Date</th><th>Customer</th><th>Method</th><th>Staff</th><th className="num">Total</th><th></th>
+                <th>Date</th>
+                <th>Product</th>
+                <th>Customer</th>
+                <th>Payment method</th>
+                <th className="num">Cost price</th>
+                <th className="num">Sold price</th>
+                <th className="num">Qty</th>
+                <th>Staff</th>
               </tr>
             </thead>
             <tbody>
-              {sales.map((s) => (
-                <React.Fragment key={s.id}>
-                  <tr>
-                    <td className="nums">{s.invoice_no}</td>
-                    <td>{new Date(s.created_at).toLocaleString()}</td>
-                    <td>{s.customer_name || '—'}</td>
-                    <td style={{ textTransform: 'capitalize' }}>
-                      {s.payment_method}{s.installments ? ` (${s.installments}x)` : ''}
-                    </td>
-                    <td>{s.profiles?.full_name || '—'}</td>
-                    <td className="num">{Number(s.total).toFixed(2)}</td>
-                    <td className="num">
-                      <button className="btn secondary sm" onClick={() => toggleExpand(s)}>
-                        {expanded === s.id ? 'Hide' : 'Items'}
-                      </button>
-                    </td>
-                  </tr>
-                  {expanded === s.id && (
-                    <tr>
-                      <td colSpan={7} style={{ background: '#FAFBFC' }}>
-                        {items.map((it) => (
-                          <div key={it.id} style={{ fontSize: 12, padding: '2px 0' }}>
-                            {it.quantity}× {it.products?.name} ({it.products?.sku || '—'}) — {Number(it.subtotal).toFixed(2)}
-                          </div>
-                        ))}
-                      </td>
-                    </tr>
-                  )}
-                </React.Fragment>
+              {filtered.map((r) => (
+                <tr key={r.id}>
+                  <td>{new Date(r.sale.created_at).toLocaleString()}</td>
+                  <td>
+                    {r.products?.name || '—'}
+                    {r.products?.sku ? <span style={{ color: 'var(--text-dim)' }}> ({r.products.sku})</span> : null}
+                  </td>
+                  <td>{r.sale.customer_name || '—'}</td>
+                  <td style={{ textTransform: 'capitalize' }}>
+                    {r.sale.payment_method}{r.sale.installments ? ` (${r.sale.installments}x)` : ''}
+                  </td>
+                  <td className="num">{Number(r.products?.cost_price ?? 0).toFixed(2)}</td>
+                  <td className="num">{Number(r.unit_price).toFixed(2)}</td>
+                  <td className="num">{r.quantity}</td>
+                  <td>{r.sale.profiles?.full_name || '—'}</td>
+                </tr>
               ))}
             </tbody>
           </table>
